@@ -8,11 +8,11 @@ def get_world():
     world = sio.loadmat('data/world.mat')['world']
     world = world[0][0]
     
-    word_idx = world[0][0]
+    word_idx = world[0][0] - 1
     words = list(itertools.chain.from_iterable(map(list, world[1][0])))  
     word_dict = dict(zip(word_idx, words))
     
-    obj_idx = world[3][0]
+    obj_idx = world[3][0] - 1
     objs = list(itertools.chain.from_iterable(map(list, world[4][0])))  
     obj_dict = dict(zip(obj_idx, objs))
     
@@ -28,8 +28,8 @@ def get_gold_lexicon(word_dict, obj_dict):
     lex_dict_index = {}
     lex_dict_readable = {}
     for i, j in zip(lex[0], lex[1]):
-        lex_dict_index[i] = j
-        lex_dict_readable[word_dict[i]] = obj_dict[j]
+        lex_dict_index[i-1] = j-1
+        lex_dict_readable[word_dict[i-1]] = obj_dict[j-1]
         
     return lex_dict_index, lex_dict_readable
 
@@ -44,8 +44,8 @@ def get_corpus(word_dict, obj_dict):
     corpus_readable = []
     for pair in corpus:
         
-        scene = list(pair[0][0])
-        utt = list(pair[1][0])
+        scene = list(pair[0][0]-1)
+        utt = list(pair[1][0]-1)
         new_pair = {'scene': scene, 'utt': utt}
         corpus_idx.append(new_pair)
         

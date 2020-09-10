@@ -1,13 +1,12 @@
 import argparse
-from torch import randn, tensor
+from torch import randn, tensor, stack, no_grad
 import scipy.io as sio
 import pandas as pd
 import numpy as np
 import itertools
 
 from torch.utils.data import SequentialSampler
-from torch import stack
-from torch.nn import MarginRankingLoss, CosineSimilarity
+from torch.nn import MarginRankingLoss, CosineSimilarity, HingeEmbeddingLoss
 
 def get_world():
     
@@ -63,40 +62,64 @@ def get_corpus(word_dict, obj_dict):
     return corpus_idx, corpus_readable
 
 def get_embeds(vocab, objs):
+    # TODO: create multiple, individual gradients instead. 
     assert len(vocab) == len(set(vocab)) # ensure vocab is unique words
-    vocab_embeds = randn(len(vocab), 50) 
-    obj_embeds = randn(len(objs), 50)
+    # vocab_embeds = randn(len(vocab), 50, requires_grad=True) 
+    # obj_embeds = randn(len(objs), 50, requires_grad=True)
     # types = ['word' for word in vocab] + ['obj' for obj in objs]
 
     # frame = pd.DataFrame({'embed':embeds}, index = pd.Index(vocab + objs, name='item'))
     # frame['type'] = types
-    create_map = lambda ws, emb_list: {ws[i]: emb_list[i] for i in range(len(ws))}
-    return create_map(vocab, vocab_embeds), create_map(objs, obj_embeds)
+    # create_map = lambda ws, emb_list: {ws[i]: emb_list[i] for i in range(len(ws))}
+    create_map = lambda ws: {ws[i]: randn(50, requires_grad=True) for i in range(len(ws))}
+
+    # return create_map(vocab, vocab_embeds), create_map(objs, obj_embeds)
+    return create_map(vocab), create_map(objs)
 
 def upperize(strs):
     return list(map(lambda x: x.upper(), strs))
 
 def train_loop(w_to_embeds, obj_to_embeds, corpus):
+
+    
     num_epochs = 20 # number of sweeps through corpus
+    learning_rate = 0.5
+    def grad_update_embeds(elem_to_embeds):
+        for elem, embed in elem_to_embeds.items():
+            if elem_to_embeds[elem].grad is not None:
+                elem_to_embeds[elem] -= learning_rate * embed
+                elem_to_embeds[elem].grad.zero_()
+
     product = itertools.product
     get_key_random_sample = lambda d: np.random.choice(np.array(list(d.keys())))
     cos = CosineSimilarity(dim=1)
-    loss_f = MarginRankingLoss() 
-    for scene_utt_pair_d in corpus:
-        scene_objs = upperize(scene_utt_pair_d['scene'])
-        scene_utter = scene_utt_pair_d['utt']
+    loss_f = HingeEmbeddingLoss() 
+    for _ in range(num_epochs):
 
-        loss = 0
-        for (obj, word) in product(scene_objs, scene_utter):
-            # compute loss 
-            obj_embed = obj_to_embeds[obj]
-            word_embed = w_to_embeds[word]
-            neg_sample_w = get_key_random_sample(w_to_embeds)
-            neg_sample_embed = w_to_embeds[neg_sample_w]
-            cos_vals = cos(stack((obj_embed, obj_embed)), stack((word_embed, neg_sample_embed)))
-            y = tensor([1, -1])
-            loss += loss_f(cos_vals, y)
-    return 
+        for scene_utt_pair_d in corpus:
+            scene_objs = upperize(scene_utt_pair_d['scene'])
+            scene_utter = scene_utt_pair_d['utt']
+
+            loss = 0
+            for (obj, word) in product(scene_objs, scene_utter):
+                # compute loss 
+                obj_embed = obj_to_embeds[obj]
+                word_embed = w_to_embeds[word]
+                neg_sample_w = get_key_random_sample(w_to_embeds)
+                neg_sample_embed = w_to_embeds[neg_sample_w]
+                cos_vals = cos(stack((obj_embed, obj_embed)), stack((word_embed, neg_sample_embed)))
+                cos_vals = cos(obj_embed.view(1,-1), word_embed.view(1,-1))
+                y = tensor([1, -1])
+                loss += loss_f(cos_vals, y)
+                # loss = loss_f(cos_vals, y)
+            loss.backward()
+            print(loss)
+
+            with no_grad():
+                grad_update_embeds(obj_to_embeds)
+                grad_update_embeds(w_to_embeds)
+        
+    return w_to_embeds, obj_to_embeds
     
 if __name__ == '__main__':
     word_dict, obj_dict = get_world()
